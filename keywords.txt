@@ -1,0 +1,30 @@
+#######################################
+# Syntax Coloring Map 
+#######################################
+
+#######################################
+# Datatypes (KEYWORD1)
+#######################################
+
+
+
+#######################################
+# Methods and Functions (KEYWORD2)
+#######################################
+
+pushData	KEYWORD2
+pause
+samplesInBuffer
+isPlaying
+available
+numChannels
+samplerate
+bitrate
+frames
+framesize
+
+
+#######################################
+# Constants (LITERAL1)
+#######################################
+AudioPlayMP3Queue	LITERAL1
