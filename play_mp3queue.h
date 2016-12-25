@@ -31,7 +31,6 @@ SOFTWARE.
 
 #include <Arduino.h>
 #include <Audio.h>
-
 #include "mp3/coder.h"
 
 #define MP3_FRAMEBUFFERS 		2 //# of input buffers. minimum 2
@@ -40,10 +39,12 @@ SOFTWARE.
 #define MP3_BITRATE_MAX			320000 //320kbps
 #define MP3_SAMPLERATE_MAX		48000
 #define MP3_SAMPLES_PER_FRAME 	1152
-#define MP3_FRAME_SIZE 			((int) ceil(( ((MP3_SAMPLES_PER_FRAME / 8) * MP3_BITRATE_MAX / MP3_SAMPLERATE_MAX) ) & 0xFFE) + 2)
-#define MP3_IN_BUFSIZE 			MP3_FRAME_SIZE * MP3_FRAMEBUFFERS
+#define MP3_FRAME_SIZE 			(int) ceil((MP3_SAMPLES_PER_FRAME / 8) * MP3_BITRATE_MAX / MP3_SAMPLERATE_MAX)
+#define MP3_IN_BUFSIZE 			(MP3_FRAME_SIZE+1) * MP3_FRAMEBUFFERS
 
 #define ERR_MP3_INVALID_FORMAT	-99
+
+typedef int (*codecGetData)(uint8_t* p, int len);
 
 struct _MP3DecInfo_data {
 	FrameHeader fh;
@@ -61,25 +62,31 @@ public:
 	AudioPlayMP3Queue(void) : AudioStream(0, NULL) { paused = 0; init(); };
 	void reset(void) { init(); }
 
+	void setCallback(codecGetData getData) { cbGetData = getData; }; //set callback for pushData(void)
+	int pushData(void);
+	
 	int pushData(uint8_t* data, int* length);
-	void pause(uint8_t pause) { paused = pause;}
+	inline void pause(uint8_t pause) { paused = pause;}
 
-	int samplesInBuffer(void) {return outbuf_count * mp3FrameInfo.outputSamps - (mp3FrameInfo.outputSamps - play_pos); }
-	int isPlaying(void) {return (samplesInBuffer() > 0);}
-	int available(void) { return sizeof(framebuf) - framebuf_BytesCount; }
-	int numChannels(void) { return mp3FrameInfo.nChans; }
-	int samplerate(void) { return mp3FrameInfo.samprate; }
-	int bitrate(void) {return mp3FrameInfo.bitrate; }
-	int frames(void) { return decoded_frames; }
-	int framesize(void) { return (mp3FrameInfo.outputSamps / 8 * mp3FrameInfo.bitrate) / mp3FrameInfo.samprate; }
+	inline int free(void) { return sizeof(framebuf) - framebuf_BytesCount; }
+	inline int samplesInBuffer(void) { return outbuf_count * mp3FrameInfo.outputSamps - (mp3FrameInfo.outputSamps - play_pos); }
+	inline int isPlaying(void) {return (samplesInBuffer() > 0); }
+	inline int available(void) { return sizeof(framebuf) - framebuf_BytesCount; }
+	inline int numChannels(void) { return mp3FrameInfo.nChans; }
+	inline int samplerate(void) { return mp3FrameInfo.samprate; }
+	inline int bitrate(void) { return mp3FrameInfo.bitrate; }
+	inline int frames(void) { return decoded_frames; }
+	inline int framesize(void) { return (mp3FrameInfo.outputSamps / 8 * mp3FrameInfo.bitrate) / mp3FrameInfo.samprate; }
 	//void debugInfo(void);
 
 private:
 
 	void init(void);
 	void initMP3(void);
+	int decode(void);
 	virtual void update(void);
 
+	codecGetData cbGetData = NULL;
 	uint8_t paused;
 
 	uint8_t framebuf[MP3_IN_BUFSIZE] __attribute__((aligned(4)));

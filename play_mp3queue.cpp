@@ -82,9 +82,34 @@ void AudioPlayMP3Queue::initMP3(void) {
 	mp3DecInfo.SubbandInfoPS = (void*)&mp3DecInfoData.sbi;
 }
 
+inline int myMP3FindSyncWord(unsigned char *buf, int nBytes)
+{
+	int i;
+
+	/* find byte-aligned syncword - need MPEG1 Layer 3 */
+	for (i = 0; i < nBytes - 1; i++) {
+		if ( ((buf[i+0] & 0xff) == 0xff) && (((buf[i+1]^0x04) & 0xfe) == 0xfe) 
+				&& ((buf[i+2] & 0xf0) != 0x00) //no free bitrate
+				&& ((buf[i+2] & 0xf0) <= 0xa0) //not above 320k
+				&& ((buf[i+2] & 0x0c) < 0x0c) //valid Sampling rate index
+				 ) 				 
+			return i;
+	}
+	
+	return -1;
+}
+
+int AudioPlayMP3Queue::pushData(void) {
+	if (cbGetData==NULL) return ERR_MP3_INDATA_UNDERFLOW;
+	int len = free();
+	if (len) {
+		int rd = cbGetData(framebuf + framebuf_BytesCount, len);
+		framebuf_BytesCount += rd;
+	}
+	return decode();
+}
+
 int AudioPlayMP3Queue::pushData(uint8_t* data, int* length) {
-	int result;
-	int offset = 0; 
 	
 	if (*length <0) *length = 0;
 		
@@ -95,29 +120,36 @@ int AudioPlayMP3Queue::pushData(uint8_t* data, int* length) {
 		*length = 0;
 	}
 
+	return decode();
+}
+
+int AudioPlayMP3Queue::decode(void) {
+int result;	
+int offset = 0; 	
+uint8_t* p = framebuf;
+
 	// ***** Check output-buffer *****
 	if (outbuf_count >= MP3_OUTPUTBUFFERS ) {
-			return 0;
+			return 0; //no free output-buffers
 	}
 
 	do {		
 		// ***** Check SYNC-START *****
 		// find start of next MP3 frame, return error if not found
-		offset = MP3FindSyncWord(p, framebuf_BytesCount);
+		offset = myMP3FindSyncWord(p, framebuf_BytesCount);
 		if (offset < 0) {
 			return ERR_MP3_INDATA_UNDERFLOW;
 		}
 
 		p += offset;
 		framebuf_BytesCount -= offset;
-		
+
 		// ***** Check framebuffer *****
-		result = MP3GetNextFrameInfo((HMP3Decoder)&mp3DecInfo, &mp3FrameInfo, p);				
-		if (result >= 0) break;
-		//Serial.println("Invalid Frameheader");
-		
-		p+=2; 
-		framebuf_BytesCount-=2;			
+		result = MP3GetNextFrameInfo((HMP3Decoder)&mp3DecInfo, &mp3FrameInfo, p);						
+		if (result == 0) break;
+
+		p+=1; 
+		framebuf_BytesCount-=1;			
 	} while (1);
 
 	if (framebuf_BytesCount < framesize() ) {			
@@ -132,8 +164,10 @@ int AudioPlayMP3Queue::pushData(uint8_t* data, int* length) {
 
 	if (result == ERR_MP3_NONE) {
 		MP3GetLastFrameInfo((HMP3Decoder)&mp3DecInfo, &mp3FrameInfo);
-		//Serial.printf("Samples: %d Channels: %d Samplerate: %d\n", mp3FrameInfo.outputSamps, mp3FrameInfo.nChans , mp3FrameInfo.samprate );
-		if ( (mp3FrameInfo.samprate > MP3_SAMPLERATE_MAX) || (mp3FrameInfo.nChans > MP3_CHANNELS_MAX) ) return ERR_MP3_INVALID_FORMAT;
+		//Serial.printf("Samples: %d Channels: d Samplerate: %d l:%d v:%d\n", mp3FrameInfo.outputSamps, mp3FrameInfo.nChans , mp3FrameInfo.samprate, mp3FrameInfo.layer, mp3FrameInfo.version );
+		#if MP3_SAMPLERATE_MAX < 48000		
+		if ( (mp3FrameInfo.samprate > MP3_SAMPLERATE_MAX) ) return ERR_MP3_INVALID_FORMAT;
+		#endif
 
 		//move unused part of framebuffer to the start
 		memmove(framebuf, p, framebuf_BytesCount);
@@ -196,7 +230,7 @@ audio_block_t	*block_right;
 
 	release(block_Count);
 
-	//Switch to the next block if no data Count:
+	//Switch to the next block if no data:
 	if (decoded_length[playing_block] == 0) {
 		played_frames++;
 		playing_block++;
